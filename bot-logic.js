@@ -1,38 +1,40 @@
 // bot-logic.js
+
 /**
- * Экспортируем функцию, которая получает готовый bot и готовый airtable-base.
- * В ней мы просто регистрируем хендлеры.
+ * Регистрирует все хендлеры Telegram‑бота.
+ * @param {import('node-telegram-bot-api')} bot
+ * @param {import('airtable').Base} base
  */
-export default function registerBotHandlers(bot, base) {
+module.exports = function registerBotHandlers(bot, base) {
   // --- i18n ---
   const MESSAGES = {
     uk: {
-      chooseLang: 'Обери мову / Выберите язык',
-      start:      'Ласкаво просимо! Скористайтеся меню для створення звіту.',
-      createReport: '🆕 Створити звіт',
-      attach:     'Додайте файли звіту. Коли готові, натисніть "✅ Готово".',
-      done:       '✅ Готово',
-      addFile:    'Файл додано. Можете додати ще або натиснути "✅ Готово".',
-      noFiles:    'Спочатку додайте файли.',
+      chooseLang:     'Обери мову / Выберите язык',
+      start:          'Ласкаво просимо! Скористайтеся меню для створення звіту.',
+      createReport:   '🆕 Створити звіт',
+      attach:         'Додайте файли звіту. Коли готові — натисніть "✅ Готово".',
+      done:           '✅ Готово',
+      addFile:        'Файл додано. Можете додати ще або натиснути "✅ Готово".',
+      noFiles:        'Спочатку додайте файли.',
       selectChannels: 'Оберіть канали:',
-      confirm:    '🚀 Підтвердити',
-      chooseAtLeast: 'Оберіть хоча б один канал.',
-      reportSaved:   '✅ Звіт збережено!',
-      errorSave:     '❌ Помилка збереження.'
+      confirm:        '🚀 Підтвердити',
+      chooseAtLeast:  'Оберіть хоча б один канал.',
+      reportSaved:    '✅ Звіт збережено!',
+      errorSave:      '❌ Помилка збереження.'
     },
     ru: {
-      chooseLang: 'Выберите язык / Оберіть мову',
-      start:      'Привет! Используйте меню для создания отчёта.',
-      createReport: '🆕 Создать отчёт',
-      attach:     'Прикрепите файлы отчёта. Когда готовы, нажмите "✅ Готово".',
-      done:       '✅ Готово',
-      addFile:    'Файл добавлен. Можно ещё или нажать "✅ Готово".',
-      noFiles:    'Сначала прикрепите файлы.',
+      chooseLang:     'Выберите язык / Оберіть мову',
+      start:          'Привет! Используйте меню для создания отчёта.',
+      createReport:   '🆕 Создать отчёт',
+      attach:         'Прикрепите файлы отчёта. Когда готовы — нажмите "✅ Готово".',
+      done:           '✅ Готово',
+      addFile:        'Файл добавлен. Можно ещё или нажать "✅ Готово".',
+      noFiles:        'Сначала добавьте файлы.',
       selectChannels: 'Выберите каналы:',
-      confirm:    '🚀 Подтвердить',
-      chooseAtLeast: 'Выберите хотя бы один канал.',
-      reportSaved:   '✅ Отчёт сохранён!',
-      errorSave:     '❌ Ошибка сохранения.'
+      confirm:        '🚀 Подтвердить',
+      chooseAtLeast:  'Выберите хотя бы один канал.',
+      reportSaved:    '✅ Отчёт сохранён!',
+      errorSave:      '❌ Ошибка сохранения.'
     }
   };
 
@@ -40,7 +42,7 @@ export default function registerBotHandlers(bot, base) {
   const pending = {};
   const CHANNELS = ['Telegram','Facebook','WhatsApp','Viber'];
 
-  // Retry–запись в Airtable
+  // Функция с retry для записи в Airtable
   async function createRecord(fields, retries = 2) {
     try {
       await base(process.env.AIRTABLE_TABLE_NAME).create([{ fields }]);
@@ -53,7 +55,7 @@ export default function registerBotHandlers(bot, base) {
     }
   }
 
-  // Клавиатуры
+  // Клавиатура выбора языка
   function langKeyboard() {
     return {
       reply_markup: {
@@ -65,6 +67,7 @@ export default function registerBotHandlers(bot, base) {
     };
   }
 
+  // Главное меню после выбора языка
   function mainMenuKeyboard(lang) {
     return {
       reply_markup: {
@@ -75,6 +78,7 @@ export default function registerBotHandlers(bot, base) {
     };
   }
 
+  // Inline‑клавиатура выбора каналов
   function channelsKeyboard(selected, lang) {
     const buttons = CHANNELS.map(ch => ({
       text: (selected.includes(ch) ? '✅ ' : '') + ch,
@@ -84,11 +88,12 @@ export default function registerBotHandlers(bot, base) {
     for (let i = 0; i < buttons.length; i += 2) {
       rows.push(buttons.slice(i, i + 2));
     }
+    // кнопка "Подтвердить"
     rows.push([{ text: MESSAGES[lang].confirm, callback_data: 'submit' }]);
     return { reply_markup: { inline_keyboard: rows } };
   }
 
-  // --- Обработчики Telegram ---
+  // 1) /start — выбор языка
   bot.onText(/\/start/, msg => {
     const id = msg.chat.id;
     pending[id] = {
@@ -100,15 +105,16 @@ export default function registerBotHandlers(bot, base) {
     bot.sendMessage(id, MESSAGES.uk.chooseLang, langKeyboard());
   });
 
+  // 2) Обработка inline‑кнопок: язык, каналы, submit
   bot.on('callback_query', async query => {
     const id = query.message.chat.id;
-    const data = query.data;
     const state = pending[id];
+    const data  = query.data;
     if (!state) {
-      return bot.answerCallbackQuery(query.id, { text: 'Сначала /start' });
+      return bot.answerCallbackQuery(query.id, { text: 'Сначала отправьте /start' });
     }
 
-    // 1) выбор языка
+    // выбор языка
     if (data.startsWith('lang:')) {
       state.lang = data.split(':')[1];
       return bot.editMessageText(MESSAGES[state.lang].start, {
@@ -117,11 +123,12 @@ export default function registerBotHandlers(bot, base) {
         reply_markup: mainMenuKeyboard(state.lang).reply_markup
       });
     }
+    // не выбран язык — отдать ошибку
     if (!state.lang) {
       return bot.answerCallbackQuery(query.id, { text: 'Сначала выберите язык.' });
     }
 
-    // 2) переключение каналов
+    // переключение каналов
     if (data.startsWith('ch:')) {
       const ch = data.slice(3);
       state.selectedChannels = state.selectedChannels || [];
@@ -136,13 +143,14 @@ export default function registerBotHandlers(bot, base) {
       );
     }
 
-    // 3) подтверждение
+    // подтверждение "submit"
     if (data === 'submit') {
       if (!state.selectedChannels.length) {
         return bot.answerCallbackQuery(query.id, { text: MESSAGES[state.lang].chooseAtLeast });
       }
+      // готовим запись в Airtable
       const attachments = state.files.map(f => ({ url: f.url }));
-      const comment = state.files.map((f,i)=>`File${i+1}: ${f.caption}`).join('\n');
+      const comment = state.files.map((f,i) => `File${i+1}: ${f.caption}`).join('\n');
       const fields = {
         Employee:   state.username,
         Channel:    state.selectedChannels,
@@ -155,8 +163,8 @@ export default function registerBotHandlers(bot, base) {
           chat_id: id,
           message_id: query.message.message_id
         });
-      } catch (err) {
-        console.error(err);
+      } catch (e) {
+        console.error(e);
         await bot.editMessageText(MESSAGES[state.lang].errorSave, {
           chat_id: id,
           message_id: query.message.message_id
@@ -166,35 +174,39 @@ export default function registerBotHandlers(bot, base) {
     }
   });
 
+  // 3) Обработка обычных сообщений: "Создать отчёт", "Готово", загрузка файлов
   bot.on('message', async msg => {
     const id = msg.chat.id;
     const state = pending[id];
     if (!state || !state.lang) return;
 
     const text = msg.text;
+    const lang = state.lang;
 
-    // «Создать отчёт»
-    if (text === MESSAGES[state.lang].createReport) {
-      return bot.sendMessage(id, MESSAGES[state.lang].attach, {
-        reply_markup: { keyboard: [[ MESSAGES[state.lang].done ]], resize_keyboard: true }
+    // нажали кнопку "🆕 Создать отчёт"
+    if (text === MESSAGES[lang].createReport) {
+      return bot.sendMessage(id, MESSAGES[lang].attach, {
+        reply_markup: { keyboard: [[ MESSAGES[lang].done ]], resize_keyboard: true }
       });
     }
-    // «✅ Готово»
-    if (text === MESSAGES[state.lang].done) {
+    // нажали кнопку "✅ Готово"
+    if (text === MESSAGES[lang].done) {
       if (!state.files.length) {
-        return bot.sendMessage(id, MESSAGES[state.lang].noFiles);
+        return bot.sendMessage(id, MESSAGES[lang].noFiles);
       }
       state.selectedChannels = [];
-      return bot.sendMessage(id, MESSAGES[state.lang].selectChannels,
-        channelsKeyboard([], state.lang)
+      return bot.sendMessage(id, MESSAGES[lang].selectChannels,
+        channelsKeyboard([], lang)
       );
     }
-    // загрузка фото/документа
+    // прислали файл (фото или документ)
     if (msg.photo || msg.document) {
-      const fileId = msg.photo ? msg.photo[msg.photo.length-1].file_id : msg.document.file_id;
+      const fileId = msg.photo
+        ? msg.photo[msg.photo.length - 1].file_id
+        : msg.document.file_id;
       const url = await bot.getFileLink(fileId);
       state.files.push({ url, caption: msg.caption || '' });
-      return bot.sendMessage(id, MESSAGES[state.lang].addFile);
+      return bot.sendMessage(id, MESSAGES[lang].addFile);
     }
   });
-}
+};
