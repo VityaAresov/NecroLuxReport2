@@ -9,7 +9,7 @@ module.exports = function registerBotHandlers(bot, base) {
   const M = {
     uk: {
       chooseLang: '❓ Оберіть мову:',
-      start:      '🎉 Ласкаво просимо! Скористайтеся меню нижче.',
+      start:      '🎉 Ласкаво просимо! Використайте меню нижче.',
       create:     '🆕 Створити звіт',
       attach:     '📎 Додайте файли звіту. Коли готові — натисніть "✅ Готово".',
       done:       '✅ Готово',
@@ -37,7 +37,7 @@ module.exports = function registerBotHandlers(bot, base) {
     }
   };
 
-  // Временное хранилище состояний чатов
+  // Хранилище состояния по chatId
   const pending = {};
   // Доступные каналы
   const CHANNELS = ['Telegram','Facebook','WhatsApp','Viber'];
@@ -60,8 +60,8 @@ module.exports = function registerBotHandlers(bot, base) {
     return {
       reply_markup: {
         inline_keyboard: [
-          [ { text: 'Українська', callback_data: 'lang:uk' } ],
-          [ { text: 'Русский',    callback_data: 'lang:ru' } ]
+          [{ text: 'Українська', callback_data: 'lang:uk' }],
+          [{ text: 'Русский',    callback_data: 'lang:ru' }]
         ]
       }
     };
@@ -89,19 +89,18 @@ module.exports = function registerBotHandlers(bot, base) {
       if (i % 2 === 0) rows.push([btn]);
       else rows[rows.length - 1].push(btn);
     });
-    // кнопка «🚀 Подтвердить»
-    rows.push([ { text: M[lang].submit, callback_data: 'submit' } ]);
-    return { reply_markup: { inline_keyboard: rows } };
+    rows.push([{ text: M[lang].submit, callback_data: 'submit' }]);
+    return { inline_keyboard: rows };
   }
 
   // 1) /start — выбираем язык
   bot.onText(/\/start/, msg => {
     const chatId = msg.chat.id;
     pending[chatId] = {
-      lang:      null,
-      files:     [],
-      channels:  [],
-      username:  msg.from.username || msg.from.first_name
+      lang:     null,
+      files:    [],
+      channels: [],
+      username: msg.from.username || msg.from.first_name
     };
     bot.sendMessage(chatId, M.uk.chooseLang, langKeyboard());
   });
@@ -117,38 +116,32 @@ module.exports = function registerBotHandlers(bot, base) {
 
     // -- выбор языка --
     if (data.startsWith('lang:')) {
-      // сохраняем язык
       state.lang = data.split(':')[1];
-      // удаляем старую клавиатуру
       await bot.deleteMessage(chatId, query.message.message_id);
-      // приветствуем и показываем главное меню
       return bot.sendMessage(chatId, M[state.lang].start, mainKeyboard(state.lang));
     }
 
-    // дальше только если язык уже выбран
     if (!state.lang) {
       return bot.answerCallbackQuery(query.id, 'Сначала выберите язык.');
     }
 
-    // -- переключаем каналы --
+    // -- выбор каналов --
     if (data.startsWith('ch:')) {
       const ch = data.slice(3);
       const idx = state.channels.indexOf(ch);
       if (idx > -1) state.channels.splice(idx, 1);
       else state.channels.push(ch);
       return bot.editMessageReplyMarkup(
-        channelsKeyboard(state.channels, state.lang).reply_markup,
+        { inline_keyboard: channelsKeyboard(state.channels, state.lang) },
         { chat_id: chatId, message_id: query.message.message_id }
       );
     }
 
-    // -- подтверждаем отправку --
+    // -- подтверждение отправки --
     if (data === 'submit') {
       if (state.channels.length === 0) {
         return bot.answerCallbackQuery(query.id, M[state.lang].needOne);
       }
-
-      // готовим запись для Airtable
       const attachments = state.files.map(f => ({ url: f.url }));
       const comment     = state.files.map((f,i) => `File${i+1}: ${f.caption}`).join('\n');
       const fields      = {
@@ -157,7 +150,6 @@ module.exports = function registerBotHandlers(bot, base) {
         Comment:    comment,
         Attachment: attachments
       };
-
       try {
         await createRecord(fields);
         await bot.editMessageText(M[state.lang].saved, {
@@ -171,21 +163,15 @@ module.exports = function registerBotHandlers(bot, base) {
           message_id: query.message.message_id
         });
       }
-
-      // Очищаем накопленные файлы/каналы (но не язык)
+      // Очищаем файлы и каналы, но сохраняем язык
       state.files = [];
       state.channels = [];
-
-      // Предлагаем заново создать отчёт
-      return bot.sendMessage(
-        chatId,
-        'Что хотите сделать дальше?',
-        mainKeyboard(state.lang)
-      );
+      // Предлагаем создать новый отчёт
+      return bot.sendMessage(chatId, 'Что хотите сделать дальше?', mainKeyboard(state.lang));
     }
   });
 
-  // 3) Обработка обычных сообщений: создание отчёта и приём файлов
+  // 3) Обработка сообщений: создание отчёта и приём файлов
   bot.on('message', msg => {
     const chatId = msg.chat.id;
     const state  = pending[chatId];
@@ -194,33 +180,30 @@ module.exports = function registerBotHandlers(bot, base) {
     const text = msg.text;
     const lang = state.lang;
 
-    // а) нажали кнопку "🆕 Создать отчёт"
+    // а) Создать отчёт
     if (text === M[lang].create) {
-      return bot.sendMessage(
-        chatId,
-        M[lang].attach,
-        { reply_markup: { keyboard: [[ M[lang].done ]], resize_keyboard: true } }
-      );
+      return bot.sendMessage(chatId, M[lang].attach, {
+        reply_markup: {
+          keyboard: [[ M[lang].done ]],
+          resize_keyboard: true
+        }
+      });
     }
-
-    // б) нажали кнопку "✅ Готово"
+    // б) Готово — убрать клавиатуру и показать inline‑каналы
     if (text === M[lang].done) {
       if (state.files.length === 0) {
         return bot.sendMessage(chatId, M[lang].noFiles);
       }
-      // запускаем выбор каналов
-      return bot.sendMessage(
-        chatId,
-        M[lang].select,
-        channelsKeyboard([], lang)
-      );
+      return bot.sendMessage(chatId, M[lang].select, {
+        reply_markup: {
+          inline_keyboard: channelsKeyboard([], lang),
+          remove_keyboard: true
+        }
+      });
     }
-
-    // в) пришёл файл (фото или документ)
+    // в) Файлы
     if (msg.photo || msg.document) {
-      const fileId = msg.photo
-        ? msg.photo[msg.photo.length - 1].file_id
-        : msg.document.file_id;
+      const fileId = msg.photo ? msg.photo.pop().file_id : msg.document.file_id;
       bot.getFileLink(fileId).then(url => {
         state.files.push({ url, caption: msg.caption || '' });
         bot.sendMessage(chatId, M[lang].add);
