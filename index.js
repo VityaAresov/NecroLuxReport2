@@ -2,53 +2,41 @@
 require('dotenv').config();
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
-const Airtable = require('airtable');
+const Airtable   = require('airtable');
 
 // 1) Настройка Airtable
 Airtable.configure({ apiKey: process.env.AIRTABLE_TOKEN });
 const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
 
-// 2) Инициализация бота в webhook-режиме
+// 2) Инициализация Telegram‑бота в режиме webhook
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { webHook: true });
-
-// Путь, на котором Render будет слушать запросы от Telegram
 const WEBHOOK_PATH = '/webhook';
-
-// Убедитесь, что в настройках Render переменная WEBHOOK_URL равна вашему домену,
-// например: https://<your-service>.onrender.com
+// в переменной WEBHOOK_URL должно быть: https://<your-service>.onrender.com
 bot.setWebHook(`${process.env.WEBHOOK_URL}${WEBHOOK_PATH}`);
 
-// 3) Подключаем логику бота
+// 3) Подключаем логику из bot-logic.js
 const registerHandlers = require('./bot-logic');
 registerHandlers(bot, base);
 
-// 4) Запускаем Express
+// 4) Поднимаем Express
 const app = express();
+// парсим тело JSON (Telegram шлёт application/json)
+app.use(express.json());
 
-// 5) На webhook-пути принимаем «сырое» тело (raw) для передачи в processUpdate
-app.use(
-  WEBHOOK_PATH,
-  express.raw({
-    type: 'application/json'
-  })
-);
-
-// 6) Обработка POST от Telegram
+// 5) Обработка POST от Telegram
 app.post(WEBHOOK_PATH, (req, res) => {
   bot.processUpdate(req.body)
-    .then(() => res.sendStatus(200))
+    .then(() => res.send('OK'))
     .catch(err => {
-      console.error('❌ Webhook processing error:', err);
+      console.error('❌ processUpdate error:', err);
       res.sendStatus(500);
     });
 });
 
-// 7) Простая страница для проверки, что сервис запущен
-app.get('/', (req, res) => {
-  res.send('OK');
-});
+// 6) Простая «здоровая» страница
+app.get('/', (_req, res) => res.send('OK'));
 
-// 8) Старт HTTPS-сервера
+// 7) Старт порта
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`🚀 Server listening on port ${port}`);
