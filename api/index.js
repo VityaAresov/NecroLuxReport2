@@ -1,15 +1,15 @@
 // api/index.js
+export const config = {
+  api: { bodyParser: false }
+};
+
 export default function handler(req, res) {
   if (req.method === 'POST') {
-    res.status(200).send('OK');          // просто «OK» на POST
-  } else {
-    res.status(200).send('GET works');   // «GET works» на GET
+    // Telegram будет ждать ответ «200 OK»
+    return res.status(200).send('OK');
   }
-}
 
-export const config = { api: { bodyParser: false } };
-
-  // GET-запросы для «health check»
+  // на GET отдаём простой текст, чтобы проверить «живо ли»:
   res.setHeader('Content-Type', 'text/plain');
-  res.status(200).send('OK');
+  return res.status(200).send('GET works');
 }
