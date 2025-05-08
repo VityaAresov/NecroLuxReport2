@@ -4,14 +4,14 @@ import rawBody from 'raw-body';
 import TelegramBot from 'node-telegram-bot-api';
 import Airtable from 'airtable';
 
-// 1) Отключаем встроенный парсер Vercel, чтобы читать raw-тело
+// 0) Отключаем встроенный bodyParser Vercel, чтобы читать raw-тело
 export const config = { api: { bodyParser: false } };
 
-// 2) Настраиваем Airtable
+// 1) Настройка Airtable
 Airtable.configure({ apiKey: process.env.AIRTABLE_TOKEN });
 const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
 
-// 3) Тексты для двух языков
+// 2) Тексты для двух языков
 const MESSAGES = {
   uk: {
     chooseLang:   'Оберіть мову:',
@@ -43,16 +43,16 @@ const MESSAGES = {
   }
 };
 
-// 4) Инициализируем бота в режиме webhook
+// 3) Инициализация бота в webhook-режиме
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { webHook: true });
-// Убедитесь, что в ENV переменная WEBHOOK_URL = https://<your-domain>/api/index
+// Устанавливаем webhook (ENV WEBHOOK_URL должен быть без "/api/index")
 bot.setWebHook(process.env.WEBHOOK_URL + '/api/index');
 
-// 5) Хранилище состояния по chatId
+// 4) Хранилище состояния
 const pending = {};
 const CHANNELS = ['Telegram','Facebook','WhatsApp','Viber'];
 
-// 6) Помощник: retry-запись в Airtable
+// 5) Запись в Airtable с retry
 async function createRecord(fields, retries = 2) {
   try {
     await base(process.env.AIRTABLE_TABLE_NAME).create([{ fields }]);
@@ -65,7 +65,7 @@ async function createRecord(fields, retries = 2) {
   }
 }
 
-// 7) Клавиатуры
+// 6) Клавиатуры
 function langKeyboard() {
   return {
     reply_markup: {
@@ -80,7 +80,7 @@ function langKeyboard() {
 function mainMenuKeyboard(lang) {
   return {
     reply_markup: {
-      keyboard: [[ MESSAGES[lang].createReport ]],
+      keyboard: [[MESSAGES[lang].createReport]],
       resize_keyboard: true,
       one_time_keyboard: true
     }
@@ -100,8 +100,7 @@ function channelsKeyboard(selected, lang) {
   return { reply_markup: { inline_keyboard: rows } };
 }
 
-// 8) Регистрация хендлеров
-
+// 7) Handlers
 // /start — выбор языка
 bot.onText(/\/start/, msg => {
   const id = msg.chat.id;
@@ -109,32 +108,23 @@ bot.onText(/\/start/, msg => {
   bot.sendMessage(id, MESSAGES.uk.chooseLang, langKeyboard());
 });
 
-// Inline-кнопки — язык, каналы, отправка
+// inline: выбор языка, каналов, отправка
 bot.on('callback_query', async query => {
   const id = query.message.chat.id;
   const state = pending[id];
   const data = query.data;
+  if (!state) return bot.answerCallbackQuery(query.id, { text: 'Сначала /start' });
 
-  if (!state) {
-    return bot.answerCallbackQuery(query.id, { text: 'Сначала /start' });
-  }
-
-  // выбор языка
   if (data.startsWith('lang:')) {
-    const lang = data.split(':')[1];
-    state.lang = lang;
-    await bot.editMessageText(MESSAGES[lang].start, {
-      chat_id: id,
-      message_id: query.message.message_id,
-      reply_markup: mainMenuKeyboard(lang).reply_markup
-    });
+    state.lang = data.split(':')[1];
+    await bot.editMessageText(
+      MESSAGES[state.lang].start,
+      { chat_id: id, message_id: query.message.message_id, reply_markup: mainMenuKeyboard(state.lang).reply_markup }
+    );
     return;
   }
-  if (!state.lang) {
-    return bot.answerCallbackQuery(query.id, { text: 'Сначала выберите язык.' });
-  }
+  if (!state.lang) return bot.answerCallbackQuery(query.id, { text: 'Сначала выберите язык.' });
 
-  // выбор каналов
   if (data.startsWith('ch:')) {
     const ch = data.slice(3);
     state.selectedChannels = state.selectedChannels || [];
@@ -149,67 +139,42 @@ bot.on('callback_query', async query => {
     );
   }
 
-  // подтверждение
   if (data === 'submit') {
     if (!state.selectedChannels || !state.selectedChannels.length) {
       return bot.answerCallbackQuery(query.id, { text: MESSAGES[state.lang].chooseAtLeast });
     }
-    // собираем поля для Airtable
     const attachments = state.files.map(f => ({ url: f.url }));
     const comment = state.files.map((f, i) => `File${i+1}: ${f.caption}`).join('\n');
-    const fields = {
-      Employee: state.username,
-      Channel:  state.selectedChannels,
-      Comment:  comment,
-      Attachment: attachments
-    };
+    const fields = { Employee: state.username, Channel: state.selectedChannels, Comment: comment, Attachment: attachments };
     try {
       await createRecord(fields);
-      await bot.editMessageText(MESSAGES[state.lang].reportSaved, {
-        chat_id: id, message_id: query.message.message_id
-      });
+      await bot.editMessageText(MESSAGES[state.lang].reportSaved, { chat_id: id, message_id: query.message.message_id });
     } catch (err) {
       console.error(err);
-      await bot.editMessageText(MESSAGES[state.lang].errorSave, {
-        chat_id: id, message_id: query.message.message_id
-      });
+      await bot.editMessageText(MESSAGES[state.lang].errorSave, { chat_id: id, message_id: query.message.message_id });
     }
     delete pending[id];
   }
 });
 
-// Простые сообщения: запуск создания отчёта, загрузка файлов
+// message: создание отчёта, загрузка файлов
 bot.on('message', msg => {
   const id = msg.chat.id;
   const state = pending[id];
   if (!state || !state.lang) return;
-
   const text = msg.text;
   const lang = state.lang;
 
-  // нажали «Создать отчёт»
   if (text === MESSAGES[lang].createReport) {
-    return bot.sendMessage(id, MESSAGES[lang].attach, {
-      reply_markup: { keyboard: [[MESSAGES[lang].done]], resize_keyboard: true }
-    });
+    return bot.sendMessage(id, MESSAGES[lang].attach, { reply_markup: { keyboard: [[MESSAGES[lang].done]], resize_keyboard: true } });
   }
-
-  // нажали «Готово»
   if (text === MESSAGES[lang].done) {
-    if (!state.files.length) {
-      return bot.sendMessage(id, MESSAGES[lang].noFiles);
-    }
+    if (!state.files.length) return bot.sendMessage(id, MESSAGES[lang].noFiles);
     state.selectedChannels = [];
-    return bot.sendMessage(id, MESSAGES[lang].selectChannels,
-      channelsKeyboard([], lang)
-    );
+    return bot.sendMessage(id, MESSAGES[lang].selectChannels, channelsKeyboard([], lang));
   }
-
-  // загрузка фото или документа
   if (msg.photo || msg.document) {
-    const fileId = msg.photo
-      ? msg.photo[msg.photo.length - 1].file_id
-      : msg.document.file_id;
+    const fileId = msg.photo ? msg.photo[msg.photo.length - 1].file_id : msg.document.file_id;
     bot.getFileLink(fileId).then(url => {
       state.files.push({ url, caption: msg.caption || '' });
       bot.sendMessage(id, MESSAGES[lang].addFile);
@@ -217,7 +182,7 @@ bot.on('message', msg => {
   }
 });
 
-// 9) HTTP-хендлер Vercel
+// 8) HTTP-handler for Vercel
 export default async function handler(req, res) {
   if (req.method === 'POST') {
     try {
@@ -230,7 +195,6 @@ export default async function handler(req, res) {
       return res.status(500).send('Error');
     }
   }
-  // GET — проверка «живо ли»
   res.setHeader('Content-Type', 'text/plain');
   return res.status(200).send('GET works');
 }
