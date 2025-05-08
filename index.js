@@ -1,48 +1,41 @@
 // index.js
-import 'dotenv/config';
-import express from 'express';
-import TelegramBot from 'node-telegram-bot-api';
-import Airtable from 'airtable';
-import botLogic from './bot-logic.js'; // ваш файл с регистрацией хендлеров
+require('dotenv').config();
+const express = require('express');
+const TelegramBot = require('node-telegram-bot-api');
+const Airtable   = require('airtable');
 
-// 1. Настроить Airtable
+// 1) Настраиваем Airtable
 Airtable.configure({ apiKey: process.env.AIRTABLE_TOKEN });
 const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
 
-// 2. Создать экземпляр бота (webhook mode)
-const token = process.env.TELEGRAM_TOKEN;
-const bot = new TelegramBot(token);
-const WEBHOOK_URL = process.env.WEBHOOK_URL; 
-// например: https://<ваш‑сервис>.onrender.com
-bot.setWebHook(`${WEBHOOK_URL}/webhook`);
+// 2) Инициализируем бота в webhook‑режиме
+const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { webHook: true });
+// WEBHOOK_URL должен быть https://<ваш‑домен>.onrender.com
+const WEBHOOK_PATH = '/webhook';
+bot.setWebHook(process.env.WEBHOOK_URL + WEBHOOK_PATH);
 
-// 3. Подключить вашу логику
-//    В bot-logic.js экспортируйте default function(bot, base){ /* reg handlers */ }
-botLogic(bot, base);
+// 3) Подключаем логику бота (создайте файл bot-logic.js рядом с этим)
+const registerHandlers = require('./bot-logic');
+registerHandlers(bot, base);
 
-// 4. Запустить Express
+// 4) Подключаем Express
 const app = express();
-// Telegram присылает JSON
-app.use(express.json());
+// нужен raw body, чтобы TelegramBot.processUpdate мог разобрать JSON
+app.use(WEBHOOK_PATH, express.raw({ type: 'application/json' }));
 
-// Health‑check
-app.get('/', (req, res) => {
-  res.send('OK');
+// 5) Обрабатываем POST от Telegram
+app.post(WEBHOOK_PATH, (req, res) => {
+  bot.processUpdate(req.body)
+    .then(() => res.sendStatus(200))
+    .catch(err => {
+      console.error('Webhook error:', err);
+      res.sendStatus(500);
+    });
 });
 
-// Webhook endpoint
-app.post('/webhook', async (req, res) => {
-  try {
-    await bot.processUpdate(req.body);
-    res.status(200).send('OK');
-  } catch (err) {
-    console.error('Error handling update:', err);
-    res.sendStatus(500);
-  }
-});
+// 6) Простая проверка здоровья
+app.get('/', (req, res) => res.send('OK'));
 
-// Старт
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
-});
+// 7) Запуск
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`Server listening on ${port}`));
