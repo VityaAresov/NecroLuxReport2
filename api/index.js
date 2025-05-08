@@ -4,15 +4,19 @@ import rawBody from 'raw-body';
 import TelegramBot from 'node-telegram-bot-api';
 import Airtable from 'airtable';
 
-// --- Initialize Telegram Bot in webhook mode ---
-const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { webHook: true });
-
 // --- Configure Airtable ---
 Airtable.configure({ apiKey: process.env.AIRTABLE_TOKEN });
 const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
 
+// --- Initialize Telegram Bot in webhook mode ---
+const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { webHook: true });
+// Set webhook URL (ensure you have set WEBHOOK_URL in Vercel env)
+bot.setWebHook(process.env.WEBHOOK_URL).then(() => {
+  console.log('Webhook set to', process.env.WEBHOOK_URL);
+}).catch(err => console.error('Error setting webhook:', err.message));
+
 // --- In-memory storage and helper functions ---
-const pending = {};
+const pending = {};  // { [chatId]: { files: [], username, selectedChannels } }
 const CHANNELS = ['Telegram','Facebook','WhatsApp','Viber'];
 
 async function createRecordWithRetry(fields, retries = 2) {
@@ -42,35 +46,42 @@ function makeChannelsKeyboard(selected = []) {
 
 // --- Telegram handlers ---
 bot.onText(/\/start/, msg => {
-  bot.sendMessage(msg.chat.id, 'Привет! Отправь файл(ы) отчёта.', {
+  bot.sendMessage(msg.chat.id, 'Привет! Нажмите «🆕 Создать отчёт»', {
     reply_markup: { keyboard: [['🆕 Создать отчёт']], resize_keyboard: true }
   });
 });
 
 bot.on('message', msg => {
-  const { chat: { id: chatId }, text } = msg;
-  if (text === '🆕 Создать отчёт') {
+  const chatId = msg.chat.id;
+  if (msg.text === '🆕 Создать отчёт') {
     pending[chatId] = { files: [], username: msg.from.username || msg.from.first_name };
-    bot.sendMessage(chatId, 'Прикрепите фото или документ(ы). Когда готовы, нажмите ‟✅ Готово”.', {
+    bot.sendMessage(chatId, 'Прикрепите файлы отчёта. Когда всё готово, нажмите «✅ Готово».', {
       reply_markup: { keyboard: [['✅ Готово']], resize_keyboard: true }
     });
   }
 });
 
-async function handleFile(msg, fileId) {
+bot.on('photo', async msg => {
   const chatId = msg.chat.id;
   if (!pending[chatId]) return;
+  const fileId = msg.photo.pop().file_id;
   const url = await bot.getFileLink(fileId);
   pending[chatId].files.push({ url, caption: msg.caption || '' });
-  bot.sendMessage(chatId, 'Добавлено. Можно ещё или нажать „✅ Готово”.');
-}
-bot.on('photo', msg => handleFile(msg, msg.photo.pop().file_id));
-bot.on('document', msg => handleFile(msg, msg.document.file_id));
+  bot.sendMessage(chatId, 'Файл добавлен. Можно ещё или нажать «✅ Готово».');
+});
+
+bot.on('document', async msg => {
+  const chatId = msg.chat.id;
+  if (!pending[chatId]) return;
+  const url = await bot.getFileLink(msg.document.file_id);
+  pending[chatId].files.push({ url, caption: msg.caption || '' });
+  bot.sendMessage(chatId, 'Файл добавлен. Можно ещё или нажать «✅ Готово».');
+});
 
 bot.onText(/✅ Готово/, msg => {
   const chatId = msg.chat.id;
   const entry = pending[chatId];
-  if (!entry || !entry.files.length) return bot.sendMessage(chatId, 'Сначала добавьте файлы.');
+  if (!entry || !entry.files.length) return bot.sendMessage(chatId, 'Сначала отправьте файлы.');
   entry.selectedChannels = [];
   bot.sendMessage(chatId, 'Выберите каналы:', makeChannelsKeyboard());
 });
@@ -79,7 +90,7 @@ bot.on('callback_query', async query => {
   const chatId = query.message.chat.id;
   const data = query.data;
   const entry = pending[chatId];
-  if (!entry) return bot.answerCallbackQuery(query.id, { text: 'Начните через меню.' });
+  if (!entry) return bot.answerCallbackQuery(query.id, { text: 'Сначала создайте отчёт.' });
 
   if (data.startsWith('ch:')) {
     const ch = data.slice(3);
@@ -95,12 +106,7 @@ bot.on('callback_query', async query => {
     if (!entry.selectedChannels.length) return bot.answerCallbackQuery(query.id, { text: 'Выберите хотя бы один канал.' });
     const attachments = entry.files.map(f => ({ url: f.url }));
     const comment = entry.files.map((f, i) => `Файл${i+1}: ${f.caption}`).join('\n');
-    const fields = {
-      Employee: entry.username,
-      Channel: entry.selectedChannels,
-      Comment: comment,
-      Attachment: attachments
-    };
+    const fields = { Employee: entry.username, Channel: entry.selectedChannels, Comment: comment, Attachment: attachments };
     try {
       await createRecordWithRetry(fields);
       bot.editMessageText('✅ Отчёт сохранён!', { chat_id: chatId, message_id: query.message.message_id });
@@ -113,15 +119,12 @@ bot.on('callback_query', async query => {
 });
 
 // --- Vercel handler ---
-export const config = {
-  api: { bodyParser: false }
-};
-
+export const config = { api: { bodyParser: false } };
 export default async function handler(req, res) {
   if (req.method === 'POST') {
     const buf = await rawBody(req);
     const update = JSON.parse(buf.toString());
-    bot.processUpdate(update);
+    await bot.processUpdate(update);
     res.status(200).send('OK');
   } else {
     res.status(200).send('OK');
