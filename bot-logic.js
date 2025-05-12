@@ -19,7 +19,11 @@ module.exports = function registerBotHandlers(bot, base) {
       submit:     '🚀 Підтвердити',
       needOne:    '❗️ Оберіть хоча б один канал.',
       saved:      '✅ Звіт збережено!',
-      error:      '❌ Помилка збереження.'
+      error:      '❌ Помилка збереження.',
+      handbook: '📘 Довідник',
+      contact:  '📞 Звʼязатися з менеджером',
+      handbookLink: 'Ознайомтесь з довідником за посиланням:',
+      contactLink:  'Для звʼязку з менеджером перейдіть за посиланням:'
     },
     ru: {
       chooseLang: '❓ Выберите язык:',
@@ -33,7 +37,11 @@ module.exports = function registerBotHandlers(bot, base) {
       submit:     '🚀 Подтвердить',
       needOne:    '❗️ Выберите хотя бы один канал.',
       saved:      '✅ Отчёт сохранён!',
-      error:      '❌ Ошибка сохранения.'
+      error:      '❌ Ошибка сохранения.',
+      handbook: '📘 Справочник',
+      contact:  '📞 Связаться с Менеджером',
+      handbookLink: 'Ознакомьтесь со справочником по ссылке:',
+      contactLink:  'Для связи с менеджером перейдите по ссылке:'
     }
   };
 
@@ -71,7 +79,11 @@ module.exports = function registerBotHandlers(bot, base) {
   function mainKeyboard(lang) {
     return {
       reply_markup: {
-        keyboard: [[ M[lang].create ]],
+        keyboard: [
+        [ M[lang].create ],
+        [ M[lang].handbook ],
+        [ M[lang].contact ]
+      ],
         resize_keyboard: true,
         one_time_keyboard: true
       }
@@ -207,7 +219,14 @@ module.exports = function registerBotHandlers(bot, base) {
       bot.getFileLink(fileId).then(url => {
         state.files.push({ url, caption: msg.caption || '' });
         bot.sendMessage(chatId, M[lang].add);
+}
       });
-    }
+// г) Дополнительные команды
+if (text === M[lang].handbook) {
+  return bot.sendMessage(chatId, `${M[lang].handbookLink}\nhttps://docs.google.com/document/d/1wHTaZDPRmG-1JmZqK2yHzK6F6KavJsodOEqnts3FXws/view`);
+}
+if (text === M[lang].contact) {
+  return bot.sendMessage(chatId, `${M[lang].contactLink}\nhttps://t.me/vitya_aresov`);
+}
   });
 };
