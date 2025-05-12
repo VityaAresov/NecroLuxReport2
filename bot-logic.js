@@ -219,7 +219,6 @@ module.exports = function registerBotHandlers(bot, base) {
       bot.getFileLink(fileId).then(url => {
         state.files.push({ url, caption: msg.caption || '' });
         bot.sendMessage(chatId, M[lang].add);
-        }
        });
      }
 // г) Дополнительные команды
