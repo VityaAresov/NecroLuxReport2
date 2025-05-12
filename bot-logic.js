@@ -219,8 +219,9 @@ module.exports = function registerBotHandlers(bot, base) {
       bot.getFileLink(fileId).then(url => {
         state.files.push({ url, caption: msg.caption || '' });
         bot.sendMessage(chatId, M[lang].add);
-}
-      });
+        }
+       });
+     }
 // г) Дополнительные команды
 if (text === M[lang].handbook) {
   return bot.sendMessage(chatId, `${M[lang].handbookLink}\nhttps://docs.google.com/document/d/1wHTaZDPRmG-1JmZqK2yHzK6F6KavJsodOEqnts3FXws/view`);
